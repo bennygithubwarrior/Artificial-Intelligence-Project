@@ -59,3 +59,28 @@ y = np.array(y)
 
 print(f"Total images loaded: {len(X)}")
 print(f"Total labels loaded: {len(y)}")
+
+#----------------------------------Ends here----------------------------------
+
+
+
+# splitting dataset into training and testing(80/20 split)
+# plotting images to see whether dataset is being loaded with resized scale
+
+
+
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+plt.figure(figsize=(10,10))
+for i in range(25):
+    plt.subplot(5,5,i+1)
+    plt.xticks([])
+    plt.yticks([])
+    plt.grid(False)
+    plt.imshow(X_train[i])
+    plt.xlabel(f"Label: {y_train[i]}")
+
+plt.show()
