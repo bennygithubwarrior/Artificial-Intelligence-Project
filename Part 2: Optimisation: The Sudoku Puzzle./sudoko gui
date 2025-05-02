@@ -1,1 +1,189 @@
+class EnhancedSudokuGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Enhanced Sudoku Solver")
+        self.configure(bg="#ececec")
+        self.resizable(False, False)
 
+        self.board = None
+        self.orig = None
+        self.cells: Dict[Cell, tk.Label] = {}
+        self.solver: Optional[SudokuSolver] = None
+
+        self.delay_var = tk.DoubleVar(value=config["delay"])
+        self.visualize_var = tk.BooleanVar(value=True)
+
+        self.drive_ids = {
+            "Easy":   "1ZE8PcwOpxLDLg6uesbFmEYHhBSfUUXga",
+            "Medium": "1Ppbq1mM407yYAkA9q_63GnjF1GrW1wLB",
+            "Hard":   "1YL1fdAFRrlLE-ZiuBH79-QcSHdanMamW"
+        }
+        self.selected_drive = tk.StringVar(value="Easy")
+
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        c = tk.Frame(self, bg="#ececec", padx=10, pady=10)
+        c.pack(fill="x")
+
+        tk.Button(c, text="Load Local Puzzle", command=self.load_local).grid(row=0, column=0, padx=5)
+
+        df = tk.Frame(c, bg="#ececec")
+        df.grid(row=0, column=1, padx=5)
+
+        tk.OptionMenu(df, self.selected_drive, *self.drive_ids).grid(row=0, column=0)
+        tk.Button(df, text="Load From Drive", command=self.load_drive).grid(row=0, column=1, padx=5)
+
+        self.solve_btn = tk.Button(c, text="Solve Puzzle", command=self.start, state=tk.DISABLED)
+        self.solve_btn.grid(row=0, column=2, padx=5)
+
+        tk.Checkbutton(c, text="Visualize", variable=self.visualize_var, bg="#ececec").grid(row=1, column=0, pady=5)
+        tk.Label(c, text="Delay (s):", bg="#ececec").grid(row=1, column=1)
+        tk.Scale(c, variable=self.delay_var, from_=0.0, to=0.5, resolution=0.01, orient="horizontal", bg="#ececec").grid(row=1, column=2, padx=5)
+
+        self.pause_btn = tk.Button(c, text="Pause", command=self.toggle_pause, state=tk.DISABLED)
+        self.pause_btn.grid(row=2, column=0, pady=5)
+
+        self.step_btn = tk.Button(c, text="Step", command=self.step_one, state=tk.DISABLED)
+        self.step_btn.grid(row=2, column=1, pady=5)
+
+        self.status_lbl = tk.Label(c, text="Status: Waiting", bg="#ececec", font=("Helvetica", 10, "italic"))
+        self.status_lbl.grid(row=3, column=0, columnspan=3, pady=5)
+
+        lf = tk.Frame(self, bg="#ececec")
+        lf.pack(fill="both", padx=10, pady=5, expand=True)
+        tk.Label(lf, text="Solver Log:", bg="#ececec", font=("Helvetica", 10, "bold")).pack(anchor="w")
+        self.log_txt = scrolledtext.ScrolledText(lf, height=8, state="disabled")
+        self.log_txt.pack(fill="both", expand=True)
+
+        bf = tk.Frame(self, bg="black", padx=4, pady=4)
+        bf.pack(padx=10, pady=10)
+        for br in range(3):
+            for bc in range(3):
+                sub = tk.Frame(bf, bg="black", bd=2, relief="solid")
+                sub.grid(row=br, column=bc, padx=2, pady=2)
+                for i in range(3):
+                    for j in range(3):
+                        r, c = 3*br + i, 3*bc + j
+                        lbl = tk.Label(sub, text='', width=2, height=1, font=('Helvetica',24,'bold'), bg='white', bd=1, relief='ridge')
+                        lbl.grid(row=i, column=j, padx=1, pady=1)
+                        self.cells[(r, c)] = lbl
+
+    def log(self, msg: str) -> None:
+        self.log_txt.config(state="normal")
+        self.log_txt.insert("end", msg + "\n")
+        self.log_txt.config(state="disabled")
+        self.log_txt.see("end")
+        logger.info(msg)
+
+    def load_local(self) -> None:
+        path = filedialog.askopenfilename(title="Select Sudoku Puzzle", filetypes=(("Text Files","*.txt"),("All Files","*.*")))
+        if not path:
+            return
+        try:
+            bd = PuzzleLoader.load_local(path)
+            self._new_board(bd, "Local puzzle loaded")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self.log(f"Local load error: {e}")
+
+    def load_drive(self) -> None:
+        fid = self.drive_ids[self.selected_drive.get()]
+        try:
+            txt = PuzzleLoader.download_from_drive(fid)
+            bd = PuzzleLoader.parse_text(txt)
+            self._new_board(bd, f"{self.selected_drive.get()} puzzle loaded")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self.log(f"Drive load error: {e}")
+
+    def _new_board(self, bd: List[List[int]], status: str) -> None:
+        self.board = bd
+        self.orig = copy.deepcopy(bd)
+        self.update_board(initial=True)
+        self.status_lbl.config(text=f"Status: {status}")
+        self.solve_btn.config(state=tk.NORMAL)
+        self.log(status)
+
+    def update_board(self, initial=False, final=False) -> None:
+        for r in range(9):
+            for c in range(9):
+                val = self.board[r][c]
+                lbl = self.cells[(r, c)]
+                if val:
+                    if initial:
+                        bg = "light gray"
+                    elif final and self.orig[r][c] == 0:
+                        bg = "light green"
+                    else:
+                        bg = "white"
+                    lbl.config(text=str(val), bg=bg)
+                else:
+                    lbl.config(text='', bg='white')
+        self.update_idletasks()
+
+    def visual_cb(self, cell: Cell, val: int, action: str) -> None:
+        r, c = cell
+        lbl = self.cells[(r, c)]
+        if action == "assign":
+            lbl.config(text=str(val), bg="light green")
+            self.log(f"Assigned {val} at {cell}")
+        else:
+            lbl.config(text='', bg="white")
+            self.log(f"Backtracked at {cell}")
+        self.update_idletasks()
+
+    def start(self) -> None:
+        if not self.board:
+            messagebox.showerror("Error", "Load a puzzle first.")
+            return
+        self.solve_btn.config(state=tk.DISABLED)
+        self.pause_btn.config(state=tk.NORMAL)
+        self.step_btn.config(state=tk.NORMAL)
+        self.status_lbl.config(text="Status: Solving...")
+        self.log("Solver started.")
+        solver = SudokuSolver(copy.deepcopy(self.board))
+        self.solver = solver
+        t = threading.Thread(target=self._run, args=(solver,), daemon=True)
+        t.start()
+
+    def _run(self, solver: SudokuSolver) -> None:
+        save_config({**config, "delay": self.delay_var.get()})
+        delay = self.delay_var.get() if self.visualize_var.get() else 0.0
+        res = solver.solve(cb=self.visual_cb if self.visualize_var.get() else None, delay=delay)
+        if res:
+            self.board = solver.board
+            self.update_board(final=True)
+            self.status_lbl.config(text="Status: Solved!")
+            self.log("Puzzle solved.")
+        else:
+            self.status_lbl.config(text="Status: No solution")
+            self.log("No solution found.")
+            messagebox.showerror("No Solution", "Cannot solve this puzzle.")
+        self.pause_btn.config(state=tk.DISABLED)
+        self.step_btn.config(state=tk.DISABLED)
+
+    def toggle_pause(self) -> None:
+        sol = self.solver
+        if not sol:
+            return
+        with sol.pause_cond:
+            sol.paused = not sol.paused
+            if not sol.paused:
+                sol.pause_cond.notify_all()
+        self.pause_btn.config(text="Resume" if sol.paused else "Pause")
+        self.log(f"Solver {'paused' if sol.paused else 'resumed'}.")
+
+    def step_one(self) -> None:
+        sol = self.solver
+        if not sol:
+            return
+        with sol.pause_cond:
+            sol.step_mode = True
+            sol.paused = False
+            sol.pause_cond.notify_all()
+        self.log("Solver stepped once.")
+
+if __name__ == "__main__":
+    app = EnhancedSudokuGUI()
+    app.mainloop()
